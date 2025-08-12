@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Text editor test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.tiny.cloud/1/k9o6rggbfqyr3tjmnyqeybwdvws1o7xltrz202h31to97h98/tinymce/8/tinymce.min.js"
+          referrerpolicy="origin" crossorigin="anonymous"></script>
+</head>
+<body>
+  <header>
+    <div class="toolbar"><button id="btn-insert" class="btn">Insert</button></div>
+  </header>
+
+  <main class="layout">
+    <section class="work">
+      <textarea id="editor"></textarea>
+    </section>
+
+    <aside class="templates">
+      <tpl-panel></tpl-panel>
+    </aside>
+  </main>
+</body>
+</html>

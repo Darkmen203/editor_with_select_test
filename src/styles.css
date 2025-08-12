@@ -1,0 +1,178 @@
+:root {
+    --glass-bg: rgba(255, 255, 255, .65);
+    --glass-brd: rgba(255, 255, 255, .45);
+    --glass-shadow: 0 10px 30px rgba(0, 0, 0, .08);
+    --border: #ddd;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+
+html, body { margin: 0; padding: 0; height: 100%; }
+
+html {
+  background:
+    radial-gradient(120rem 90rem at 15% 6%,
+      #cfe3ff 0%,
+      rgba(207, 227, 255, .85) 18%,
+      rgba(207, 227, 255, .45) 48%,
+      rgba(207, 227, 255, .15) 75%,
+      rgba(207, 227, 255, 0) 92%),
+    radial-gradient(110rem 80rem at 88% 8%,
+      #ffd6e2 0%,
+      rgba(255, 214, 226, .70) 22%,
+      rgba(255, 214, 226, .35) 55%,
+      rgba(255, 214, 226, 0) 90%),
+    radial-gradient(130rem 95rem at 12% 98%,
+      #e6ffe3 0%,
+      rgba(230, 255, 227, .70) 25%,
+      rgba(230, 255, 227, .30) 60%,
+      rgba(230, 255, 227, 0) 92%),
+    linear-gradient(180deg, #f7faff 0%, #fbfaff 100%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+body {
+    min-height: 100dvh;
+    color: #111;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: transparent;
+}
+
+.toolbar,
+.work,
+.templates {
+    background: var(--glass-bg);
+    backdrop-filter: saturate(120%) blur(10px);
+    -webkit-backdrop-filter: saturate(120%) blur(10px);
+    border: 1px solid var(--glass-brd);
+    box-shadow: var(--glass-shadow);
+    border-radius: 12px;
+}
+
+.toolbar {
+    margin: 0 16px 16px 16px;
+    padding: 8px;
+}
+
+.layout {
+    display: flex;
+    gap: 16px;
+    height: calc(100vh - 49px - 32px);
+    padding: 0 16px 16px;
+}
+
+.work {
+    flex: 1;
+    padding: 12px;
+}
+
+.templates {
+    width: 320px;
+    padding: 12px;
+}
+
+button,
+.btn {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+}
+
+button:hover,
+.btn:hover {
+    background: #fafafa;
+}
+
+
+.tpl-select {
+    padding: 2px 4px;
+    font: inherit;
+}
+
+.tpl-error {
+    color: #d11;
+    font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --glass-bg: rgba(20, 20, 26, .55);
+        --glass-brd: rgba(255, 255, 255, .08);
+        --glass-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+        --border: #34343c;
+    }
+
+    html {
+        background:
+            radial-gradient(120rem 90rem at 15% 6%,
+                #2a3550 0%,
+                rgba(42, 53, 80, .75) 22%,
+                rgba(42, 53, 80, .35) 55%,
+                rgba(42, 53, 80, 0) 92%),
+            radial-gradient(110rem 80rem at 88% 8%,
+                #4b2d3a 0%,
+                rgba(75, 45, 58, .70) 25%,
+                rgba(75, 45, 58, .35) 58%,
+                rgba(75, 45, 58, 0) 92%),
+            radial-gradient(130rem 95rem at 12% 98%,
+                #2d4b33 0%,
+                rgba(45, 75, 51, .70) 28%,
+                rgba(45, 75, 51, .35) 60%,
+                rgba(45, 75, 51, 0) 92%),
+            linear-gradient(180deg, #101218 0%, #0e0f14 100%);
+    }
+
+    body{
+        color: #e8e8ea;
+    }
+
+    button,
+    .btn {
+        background: #1f1f27;
+        color: #e8e8ea;
+        border-color: var(--border);
+    }
+
+    button:hover,
+    .btn:hover {
+        background: #232330;
+    }
+
+    #editor_ifr {
+        background: transparent;
+        color: #e8e8ea;
+    }
+
+    .tox {
+        color: #e8e8ea;
+    }
+
+    .tox .tox-editor-container,
+    .tox .tox-edit-area,
+    .tox .tox-editor-header,
+    .tox .tox-statusbar {
+        background: transparent !important;
+    }
+
+    .tox-tinymce {
+        border: 2px solid #373745 !important;
+    }
+
+    .tox .tox-edit-area__iframe {
+        background: transparent !important;
+        box-shadow: none;
+        border: 0;
+    }
+
+    .tpl-select {
+        background: #1f1f27;
+        color: #e8e8ea;
+    }
+
+}
