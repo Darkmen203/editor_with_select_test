@@ -86,7 +86,6 @@ export class TplPanel extends HTMLElement {
     };
     #onDel = () => {
         TemplateStore.removeAt(this.#selected);
-        this.#selected = Math.max(0, this.#selected - 1);
     };
     #commit = () => {
         const v = this.$edit.value.trim();
