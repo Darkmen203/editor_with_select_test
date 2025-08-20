@@ -1,4 +1,7 @@
 import { TemplateStore } from './templates.js';
+import {
+    dbgEvent, dbgSelection, dbgGroup, dumpMutationRecords, markNodeChanged, isWidgetNode
+} from './debug.js';
 
 export let editor;
 
@@ -19,7 +22,6 @@ export function initEditor() {
             resize: true,
             elementpath: false,
             object_resizing: false,
-            // Разрешаем наш виджет и нужные атрибуты
             extended_valid_elements:
                 'span[class|data-tpl|contenteditable|draggable|unselectable|data-mce-resize],select[class|value],option[value|selected|class],span[class|contenteditable]',
             content_style: `
@@ -38,33 +40,59 @@ export function initEditor() {
                 editor = ed;
 
                 ed.on('init', () => {
+
+                    window.__TPLDBG_ON = false; // отключаем дебаг по умолчанию
+
+
                     const btn = document.getElementById('btn-insert');
                     if (btn) btn.addEventListener('click', () => insertDropdown(ed));
 
                     TemplateStore.onChange((templates) => updateAllDropdowns(ed, templates));
 
-                    // 1) Надёжно подавляем размножение при Enter РЯДОМ с компонентом
+                    // логируем всю цепочку событий ввода
+                    const body = ed.getBody();
+                    ['beforeinput', 'input', 'compositionstart', 'compositionend'].forEach(t => {
+                        body.addEventListener(t, (evt) => dbgEvent(`DOM ${t}`, ed, evt), { capture: true });
+                    });
+
+                    ['keydown', 'keyup'].forEach(t => {
+                        body.addEventListener(t, (evt) => dbgEvent(`DOM ${t}`, ed, evt), { capture: true });
+                    });
+
+                    // Наблюдаем (вставки/удаления узлов)
+                    if (window.__TPLDBG_ON) {
+                        const mo = new MutationObserver(dumpMutationRecords);
+                        mo.observe(body, { childList: true, characterData: true, subtree: true, attributes: true });
+                    }
+
+                    // Логи TinyMCE-слоя
+                    ed.on('BeforeExecCommand', (e) => dbgEvent('TinyMCE BeforeExecCommand', ed, e));
+                    ed.on('ExecCommand', (e) => dbgEvent('TinyMCE ExecCommand', ed, e));
+                    ed.on('NodeChange', (e) => dbgGroup('TinyMCE NodeChange', () => ({ selection: 'changed' })));
+                    ed.on('Change', (e) => dbgEvent('TinyMCE Change', ed, e));
+
+                    // подавляем размножение при Enter РЯДОМ с компонентом
                     ed.getBody().addEventListener(
                         'beforeinput',
                         (evt) => {
                             if (evt.inputType === 'insertParagraph' && isCaretAdjacentToWidget(ed)) {
                                 evt.preventDefault();
-                                insertNewLineAtCaret(ed);
+                                splitBlockAfterWidget(ed);
+                                cleanupAroundCaret(ed);
+                                markNodeChanged(ed);
                             }
                         },
                         { capture: true }
                     );
 
-                    // 2) Даём нативному select нормально открываться и не закрываться:
-                    //    глушим всплытие указательных событий (но НЕ preventDefault),
-                    //    и прямо здесь приводим ERROR к нужному виду для выпадения списка.
-                    const body = ed.getBody();
+                    // Даём нативному select нормально открываться и не закрываться:
                     const pointerEvents = ['mousedown', 'mouseup', 'click', 'pointerdown', 'pointerup', 'touchstart', 'touchend'];
                     body.addEventListener(
                         'mousedown',
                         (evt) => {
                             const sel = evt.target && (evt.target.closest?.('select.tpl-select') || (evt.target.tagName === 'SELECT' ? evt.target : null));
                             if (sel) {
+                                dbgEvent('select mousedown', ed, evt);
                                 handleSelectOpen(sel); // спрячем ERROR из выпадающего списка (если есть валидные)
                                 evt.stopPropagation();
                             }
@@ -78,21 +106,24 @@ export function initEditor() {
                                 t,
                                 (evt) => {
                                     const sel = evt.target && (evt.target.closest?.('select.tpl-select') || (evt.target.tagName === 'SELECT' ? evt.target : null));
-                                    if (sel) evt.stopPropagation();
+                                    if (sel) {
+                                        dbgEvent(`select ${t}`, ed, evt);
+                                        evt.stopPropagation();
+                                    }
                                 },
                                 { capture: true }
                             )
                         );
 
-                    // 3) Когда пользователь ВЫБРАЛ валидный пункт — снимаем ошибку и удаляем ERROR-опцию.
+                    // Когда пользователь ВЫБРАЛ валидный пункт — снимаем ошибку и удаляем ERROR-опцию.
                     body.addEventListener(
                         'change',
                         (evt) => {
                             const sel = evt.target && (evt.target.closest?.('select.tpl-select') || (evt.target.tagName === 'SELECT' ? evt.target : null));
                             if (!sel) return;
+                            dbgEvent('select change', ed, evt, { value: sel.value });
                             const val = decodeURIComponent(sel.value || '');
                             if (val !== '__ERR__') {
-                                // Снимаем ошибку и удаляем ERROR-опцию, если она ещё есть
                                 sel.classList.remove('tpl-select--error');
                                 sel.removeAttribute('aria-invalid');
                                 sel.removeAttribute('title');
@@ -108,6 +139,8 @@ export function initEditor() {
 
                 // Клавиатура для спецкомпонента
                 ed.on('keydown', (e) => {
+                    dbgEvent('TinyMCE keydown', ed, e);
+
                     const target = e.target;
 
                     // Удаление всего компонента по Backspace/Delete (когда фокус в select)
@@ -115,14 +148,16 @@ export function initEditor() {
                         const wrap = target.closest('.tpl-wrap') || target;
                         ed.dom.remove(wrap);
                         e.preventDefault();
+                        markNodeChanged(ed);
                         return;
                     }
 
                     if (e.key === 'Enter') {
-                        // НЕ перехватываем Enter внутри самого select — только если каретка рядом с виджетом
                         if (isCaretAdjacentToWidget(ed)) {
                             e.preventDefault();
-                            insertNewLineAtCaret(ed);
+                            splitBlockAfterWidget(ed);
+                            cleanupAroundCaret(ed);
+                            markNodeChanged(ed);
                         }
                     }
                 });
@@ -131,14 +166,12 @@ export function initEditor() {
     });
 }
 
-/** HTML спецкомпонента: обёртка не редактируется, чтобы TinyMCE не «сплитил» её на Enter */
 function dropdownHTML(currentValue) {
     const opts = TemplateStore.get();
     const options = opts
         .map(
             (t) =>
-                `<option value="${encodeURIComponent(t)}"${
-                    t === currentValue ? ' selected' : ''
+                `<option value="${encodeURIComponent(t)}"${t === currentValue ? ' selected' : ''
                 }>${escapeHtml(t)}</option>`
         )
         .join('');
@@ -208,14 +241,12 @@ export function updateAllDropdowns(ed, templates) {
             return;
         }
 
-        // Нормальный случай: строим список без ERROR-опции.
         const nextSelected = prev === '__ERR__' ? templates[0] : prev;
 
         sel.innerHTML = templates
             .map(
                 (t) =>
-                    `<option value="${encodeURIComponent(t)}"${
-                        t === nextSelected ? ' selected' : ''
+                    `<option value="${encodeURIComponent(t)}"${t === nextSelected ? ' selected' : ''
                     }>${escapeHtml(t)}</option>`
             )
             .join('');
@@ -249,37 +280,90 @@ function handleSelectOpen(sel) {
             err.hidden = true;
             err.disabled = true;
         }
-        // Подсветка и aria-атрибуты остаются до change (человек сам выбирает валидный пункт)
-    } catch {}
+    } catch { }
 }
 
 function escapeHtml(s) {
     return s.replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 }
 
+// junk helpers: пропуск служебных и пустых узлов
+
+const ZW_RE = /^[\u00A0\u200B-\u200D\uFEFF\s]*$/; // nbsp, zero-width, feff, whitespace
+
+function isBogusEl(el) {
+    if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+    if (el.getAttribute?.('data-mce-bogus')) return true;
+    if (el.id === 'mce_marker') return true;
+    if (el.classList?.contains('mce-offscreen-selection')) return true;
+    return false;
+}
+
+function isJunkNode(n) {
+    if (!n) return true;
+    if (n.nodeType === Node.TEXT_NODE) return ZW_RE.test(n.nodeValue || '');
+    if (n.nodeType === Node.ELEMENT_NODE) {
+        if (isBogusEl(n)) return true;
+        // пустой спан/инлайн, содержащий только "невидимые" символы
+        if (n.childNodes && n.childNodes.length === 1 && n.firstChild.nodeType === Node.TEXT_NODE) {
+            return ZW_RE.test(n.firstChild.nodeValue || '');
+        }
+        // пустой inline элемент без содержимого
+        if (!n.firstChild && n.tagName === 'SPAN') return true;
+        return false;
+    }
+    return false;
+}
+
+function prevNonJunk(container, offset) {
+    if (!container) return null;
+    const parent = container.nodeType === Node.TEXT_NODE ? container.parentNode : container;
+    let idx = container.nodeType === Node.TEXT_NODE
+        ? Array.prototype.indexOf.call(parent.childNodes, container) - (offset === 0 ? 1 : 0)
+        : offset - 1;
+    while (parent && idx >= 0) {
+        const n = parent.childNodes[idx];
+        if (!isJunkNode(n)) return n;
+        idx--;
+    }
+    return null;
+}
+
+function nextNonJunk(container, offset) {
+    if (!container) return null;
+    const parent = container.nodeType === Node.TEXT_NODE ? container.parentNode : container;
+    let idx = container.nodeType === Node.TEXT_NODE
+        ? Array.prototype.indexOf.call(parent.childNodes, container) + (offset === (container.nodeType === Node.TEXT_NODE ? container.length : 0) ? 1 : 0)
+        : offset;
+    while (parent && idx < parent.childNodes.length) {
+        const n = parent.childNodes[idx];
+        if (!isJunkNode(n)) return n;
+        idx++;
+    }
+    return null;
+}
+
 function isCaretAdjacentToWidget(ed) {
     const rng = ed.selection.getRng();
     if (!rng || !rng.collapsed) return false;
 
-    let node = rng.startContainer;
-    let offset = rng.startOffset;
+    const node = rng.startContainer;
+    const offset = rng.startOffset;
 
-    if (node.nodeType === Node.TEXT_NODE) {
-        const parent = node.parentNode;
-        if (!parent) return false;
-        const idx = Array.prototype.indexOf.call(parent.childNodes, node);
-        const prev = parent.childNodes[idx - (offset === 0 ? 1 : 0)];
-        const next = parent.childNodes[idx + (offset === node.length ? 1 : 0)];
-        return isWidget(prev) || isWidget(next);
-    }
+    const left = prevNonJunk(node, offset);
+    const right = nextNonJunk(node, offset);
 
-    if (node.nodeType === Node.ELEMENT_NODE) {
-        const prev = node.childNodes[offset - 1];
-        const next = node.childNodes[offset];
-        return isWidget(prev) || isWidget(next);
-    }
-    return false;
+    // лог
+    dbgGroup('isCaretAdjacentToWidget(SMART)', () => ({
+        left: left ? left.outerHTML || left.nodeValue : null,
+        right: right ? right.outerHTML || right.nodeValue : null,
+        leftIsWidget: isWidget(left),
+        rightIsWidget: isWidget(right)
+    }));
+
+    return isWidget(left) || isWidget(right);
 }
+
 
 function isWidget(n) {
     if (!n) return false;
@@ -289,54 +373,111 @@ function isWidget(n) {
     return false;
 }
 
-function insertNewLineAfterNode(ed, node) {
-    const br = ed.getDoc().createElement('br');
-    const parent = node.parentNode;
-    if (node.nextSibling) parent.insertBefore(br, node.nextSibling);
-    else parent.appendChild(br);
+function splitBlockAfterWidget(ed) {
+    const doc = ed.getDoc();
+    const body = ed.getBody();
+    const rng = ed.selection.getRng();
 
-    const pos = Array.prototype.indexOf.call(parent.childNodes, br) + 1;
-    ed.selection.setCursorLocation(parent, pos);
-}
+    const node = rng?.startContainer || body;
+    const offset = rng?.startOffset || 0;
+    const left = prevNonJunk(node, offset);
+    const right = nextNonJunk(node, offset);
 
-function insertNewLineAtCaret(ed) {
-  const doc = ed.getDoc();
-  const body = ed.getBody();
-  const rng = ed.selection.getRng();
+    const rawWidget =
+        (left && (left.closest?.('.tpl-wrap') || (left.tagName === 'SELECT' ? left : null))) ||
+        (right && (right.closest?.('.tpl-wrap') || (right.tagName === 'SELECT' ? right : null)));
 
-  // создаём пустой параграф как у TinyMCE при Enter
-  const p = doc.createElement('p');
-  const br = doc.createElement('br');
-  br.setAttribute('data-mce-bogus', '1');
-  p.appendChild(br);
-
-  if (!rng) {
-    body.appendChild(p);
-  } else if (rng.startContainer.nodeType === Node.TEXT_NODE) {
-    // курсор внутри текста: сплитим и вставляем <p> между частями
-    const text = rng.startContainer;
-    const off = rng.startOffset;
-    const tail = text.splitText(off);
-    tail.parentNode.insertBefore(p, tail);
-  } else if (rng.startContainer.nodeType === Node.ELEMENT_NODE) {
-    // курсор «между узлами»: вставляем <p> в это место
-    const parent = rng.startContainer;
-    const ref = parent.childNodes[rng.startOffset] || null;
-    parent.insertBefore(p, ref);
-  } else {
-    body.appendChild(p);
-  }
-
-  // Если вдруг <p> оказался внутри виджета (.tpl-wrap), переносим его сразу за виджет
-  if (p.closest && p.closest('.tpl-wrap')) {
-    const wrap = p.closest('.tpl-wrap');
-    if (wrap && wrap.parentNode) {
-      wrap.parentNode.insertBefore(p, wrap.nextSibling);
+    if (!rawWidget) {
+        insertNewLineAtCaret(ed);
+        return;
     }
-  }
+    const widget = rawWidget.closest?.('.tpl-wrap') || rawWidget;
 
-  // ставим курсор в начало нового параграфа и уведомляем редактор
-  ed.selection.setCursorLocation(p, 0);
-  ed.nodeChanged();
+    const dom = ed.dom;
+    const block = dom.getParent(widget, dom.isBlock) || body;
+
+    // создаём новый абзац и гарантируем видимый caret
+    const newP = doc.createElement('p');
+    const br = doc.createElement('span');
+    br.setAttribute('data-mce-type', 'bookmark');
+    br.setAttribute('data-mce-bogus', 'all');
+    newP.appendChild(br);
+
+    const caretBeforeWidget = right && (right === widget || right.closest?.('.tpl-wrap') === widget);
+    const startToMove = caretBeforeWidget ? widget : widget.nextSibling;
+
+    let cursor = startToMove;
+    const canMove = (n) => !!n && !isBogusEl(n);
+
+    while (cursor && canMove(cursor)) {
+        const next = cursor.nextSibling;
+        if (!isJunkNode(cursor)) {
+            newP.appendChild(cursor);  // фактический перенос (включая сам .tpl-wrap, если каретка перед ним)
+        } else {
+            try { cursor.remove(); } catch { }
+        }
+        cursor = next;
+    }
+
+    if (block.nextSibling) block.parentNode.insertBefore(newP, block.nextSibling);
+    else block.parentNode.appendChild(newP);
+
+    ensureBlockHasVisualContent(block, doc);
+
+    try {
+        const range = doc.createRange();
+        range.setStartAfter(br);
+        range.collapse(true);
+        const sel = ed.selection.getSel();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    } catch {
+        ed.selection.setCursorLocation(newP, 0);
+    }
+
+    cleanupAroundCaret(ed);
+    ed.nodeChanged();
 }
 
+function ensureBlockHasVisualContent(block, doc) {
+    if (!block) return;
+    let hasVisible = false;
+    block.childNodes.forEach?.(n => {
+        if (!isJunkNode(n) && !isBogusEl(n)) hasVisible = true;
+    });
+    if (!hasVisible) {
+        if (!block.firstChild || block.firstChild.tagName !== 'BR') {
+            block.textContent = '';
+            block.appendChild(doc.createElement('br'));
+        }
+    }
+}
+
+
+
+
+function cleanupAroundCaret(ed) {
+    try {
+        const rng = ed.selection.getRng();
+        if (!rng) return;
+        let container = rng.startContainer.nodeType === Node.TEXT_NODE ? rng.startContainer.parentNode : rng.startContainer;
+        if (!container) return;
+
+        const parent = container;
+        const purge = (n) => {
+            if (!n) return;
+            if (n.nodeType === Node.TEXT_NODE && ZW_RE.test(n.nodeValue || '')) {
+                n.remove();
+            } else if (isBogusEl(n)) {
+                n.remove();
+            } else if (n.nodeType === Node.ELEMENT_NODE && n.tagName === 'SPAN' && n.childNodes.length === 1 &&
+                n.firstChild.nodeType === Node.TEXT_NODE && ZW_RE.test(n.firstChild.nodeValue || '')) {
+                n.remove();
+            }
+        };
+        const left = parent.childNodes[rng.startOffset - 1] || null;
+        const right = parent.childNodes[rng.startOffset] || null;
+        purge(left);
+        purge(right);
+    } catch { }
+}
